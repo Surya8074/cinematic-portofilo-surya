@@ -1,19 +1,18 @@
-// Renders GIREESH into a single coverage texture and reports the ink rectangle
+// Renders SURYA into a single coverage texture and reports the ink rectangle
 // of every individual letter.
 //
-// Why a texture and not DOM text: the two people who live inside the G and the H
-// have to be clipped by the real letterforms. Sharing one atlas means the clip
-// mask and the visible letter are the same pixels, so they can never drift apart
-// by even a subpixel, at any size or device pixel ratio.
+// Why a texture and not DOM text: the person in the hero has to be clipped by
+// the real letterforms. Sharing one atlas means the clip mask and the visible
+// letter are the same pixels, so they can never drift apart by even a subpixel,
+// at any size or device pixel ratio.
 //
 // The reference artwork is set in a compressed heavy grotesque. Anton is the
 // closest widely available face but is naturally wider, so a single horizontal
 // scale is solved for at runtime to hit the reference's measured
 // word-width : cap-height ratio. One uniform scale keeps the letterforms
-// consistent with each other; per-letter fitting would distort the I into a slab
-// while squeezing the E, which is what makes lettering look counterfeit.
+// consistent with each other.
 
-const TEXT = 'GIREESH';
+const TEXT = 'SURYA';
 
 // measured from the supplied hero artwork: ink width / cap height
 export const TARGET_RATIO = 3.121;
