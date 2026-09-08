@@ -1,9 +1,8 @@
 // Boot, orchestration, the frame loop.
 //
-// Order of operations matters here: the page must sit on TRUE black until the
-// fonts, textures and the hero clip are all decodable, otherwise the sequence
-// starts and the figure pops in three frames later. Nothing is revealed until
-// everything needed for the first eight seconds is in hand.
+// The original cinematic hero video is intentionally disabled for now.
+// Its loading/creation code is kept commented below so a replacement hero
+// video can be plugged in later without rebuilding the animation system.
 
 import { Stage } from './gl/stage.js';
 import { Clip } from './lib/clip.js';
@@ -17,12 +16,10 @@ import { initChrono } from './scene3/boot3.js';
 import { initGallery } from './scene4/boot4.js';
 import { initFinale } from './scene6/boot6.js';
 
-// a cinematic page manages its own positions; the browser restoring an old
-// scroll offset mid-boot yanks the visitor (and any scripted anchor) around
 if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
 
 const MEDIA = 'public/media/';
-const MIN_BLACK = 620;          // the darkness must be felt, even on a fast line
+const MIN_BLACK = 620;
 
 const root = document.documentElement;
 const boot = document.getElementById('boot');
@@ -60,11 +57,12 @@ async function main() {
     return degrade('media manifest missing');
   }
 
-  const steps = 4;
+  // Three startup resources are used while the replacement hero is being
+  // prepared: fonts, grunge texture and grain texture. The old hero clip is
+  // deliberately NOT loaded or played right now.
+  const steps = 3;
   let done = 0;
   const tick = () => { bootFill.style.width = `${(++done / steps) * 100}%`; };
-
-  const startedAt = performance.now();
 
   await Promise.all([
     fontsReady().then(tick),
@@ -74,43 +72,41 @@ async function main() {
     }).then(tick),
   ]);
 
-  const mk = (name, loopFade) => {
-    const c = manifest.clips[name];
-    return new Clip({
-      src: [
-        { url: MEDIA + c.webm, type: 'video/webm' },
-        { url: MEDIA + c.mp4, type: 'video/mp4' },
-      ],
-      poster: MEDIA + c.poster,
-      w: c.w, h: c.h, track: c.track, loopFade,
-    });
-  };
-  app.clips.hero = mk('hero', 0.7);
+  // ORIGINAL HERO VIDEO — kept here for later replacement/reference:
+  // const mk = (name, loopFade) => {
+  //   const c = manifest.clips[name];
+  //   return new Clip({
+  //     src: [
+  //       { url: MEDIA + c.webm, type: 'video/webm' },
+  //       { url: MEDIA + c.mp4, type: 'video/mp4' },
+  //     ],
+  //     poster: MEDIA + c.poster,
+  //     w: c.w, h: c.h, track: c.track, loopFade,
+  //   });
+  // };
+  // app.clips.hero = mk('hero', 0.7);
+
+  // No hero clip is active until we upload the replacement video.
+  app.clips.hero = null;
+  tick();
 
   layout();
   window.addEventListener('resize', debounce(layout, 140));
   window.addEventListener('orientationchange', () => setTimeout(layout, 220));
 
-  await app.clips.hero.whenReady();
-  tick();
-
-  const held = performance.now() - startedAt;
+  const held = performance.now() - performance.now();
   if (held < MIN_BLACK) await wait(MIN_BLACK - held);
 
-  const playing = await app.clips.hero.play();
-
-  // the later scenes build while the hero plays, so scrolling into them is
-  // instant; each one runs only while it is actually on screen
+  // the later scenes build without depending on the temporary hero clip
   initUniverse().then((u) => { app.universe = u; })
-    .catch((e) => console.warn('[gireesh] universe unavailable:', e.message));
+    .catch((e) => console.warn('[portfolio] universe unavailable:', e.message));
   initChrono().then((c) => { app.chrono = c; })
-    .catch((e) => console.warn('[gireesh] chrono unavailable:', e.message));
+    .catch((e) => console.warn('[portfolio] chrono unavailable:', e.message));
   initGallery().then((g) => { app.gallery = g; })
-    .catch((e) => console.warn('[gireesh] gallery unavailable:', e.message));
+    .catch((e) => console.warn('[portfolio] gallery unavailable:', e.message));
   initFinale().then((f) => { app.finale = f; })
-    .catch((e) => console.warn('[gireesh] finale unavailable:', e.message));
+    .catch((e) => console.warn('[portfolio] finale unavailable:', e.message));
 
-  if (!playing) return awaitGesture();
   begin();
 }
 
@@ -121,9 +117,6 @@ function begin() {
   app.running = true;
   bindPointer();
 
-  // ?t=4.2 starts the sequence part-way through, and ?t=end lands on the
-  // settled composition. Purely a review aid for tuning a single beat without
-  // sitting through the whole opening each time.
   const q = new URLSearchParams(location.search).get('t');
   if (q !== null) {
     const at = q === 'end' ? T.settled : parseFloat(q);
@@ -135,30 +128,16 @@ function begin() {
     }
   }
   if (reduced) {
-    // honour the preference fully: land on the finished composition and hold it
-    // still - no build-up, no looping walk, no drifting grain
     app.t0 = performance.now() - T.settled * 1000;
-    for (const [, name] of CUES) root.classList.add(`is-${name}`);
-    const c = app.clips.hero;
-    const still = () => {
-      c.pause();
-      renderStill();
-      window.addEventListener('resize', debounce(renderStill, 160));
-    };
-    c.el.addEventListener('seeked', still, { once: true });
-    c.el.currentTime = Math.min(6, (c.duration || 8) * 0.6);
+    renderStill();
     return;
   }
   requestAnimationFrame(frame);
 }
 
-/** Autoplay was refused — offer a single deliberate entry point. */
 function awaitGesture() {
   bootEnter.hidden = false;
-  bootEnter.addEventListener('click', async () => {
-    await app.clips.hero.play();
-    begin();
-  }, { once: true });
+  bootEnter.addEventListener('click', async () => begin(), { once: true });
 }
 
 // --------------------------------------------------------------------------
@@ -168,7 +147,6 @@ function layout() {
   const h = window.innerHeight;
   const L = computeLayout(w, h);
   app.layout = L;
-  app.stage.resize(L);
 
   const capPx = Math.round(L.word.capH * L.dpr);
   if (!app.word || Math.abs(app.word.capPx - capPx) > 2) {
@@ -179,13 +157,12 @@ function layout() {
     app.order = letterOrder(word.letters);
   }
   app.furniture.apply(L);
+  app.stage.resize(L);
 }
 
 function bindPointer() {
   if (reduced || matchMedia('(pointer: coarse)').matches) return;
   window.addEventListener('pointermove', (e) => {
-    // normalised to -1..1, then damped in the frame loop; the response is
-    // deliberately small — depth, not a toy
     app.pointer.tx = (e.clientX / window.innerWidth) * 2 - 1;
     app.pointer.ty = (e.clientY / window.innerHeight) * 2 - 1;
   }, { passive: true });
@@ -212,15 +189,12 @@ function frame(now) {
   const p = app.pointer;
   p.x = damp(p.x, p.tx, 3.1, dt);
   p.y = damp(p.y, p.ty, 3.1, dt);
-  // parallax only comes alive once the composition has settled
   const gate = clamp((t - T.settled + 0.9) / 1.2);
   app.stage.parallax.x = p.x * gate;
   app.stage.parallax.y = p.y * gate;
 
   const state = sample(t, app.word.letters.length, app.order);
 
-  // after the intro the wordmark breathes very slightly, so the frame never
-  // becomes a static image
   if (state.settled) {
     const b = Math.sin(t * 0.42) * 0.5 + Math.sin(t * 0.27 + 1.3) * 0.5;
     for (const l of state.letters) l.dy = b * 0.0035;
@@ -233,13 +207,13 @@ function frame(now) {
 // --------------------------------------------------------------------------
 
 function degrade(reason) {
-  console.warn('[gireesh] falling back:', reason);
+  console.warn('[portfolio] falling back:', reason);
   root.classList.remove('is-booting');
   root.classList.add('is-fallback');
   boot.classList.add('is-done');
   for (const [, name] of CUES) root.classList.add(`is-${name}`);
   document.querySelector('.stage-wrap').insertAdjacentHTML('afterbegin',
-    '<div class="fallback"><p>GIREESH</p>'
+    '<div class="fallback"><p>SURYA</p>'
     + '<small>Welcome to my world</small></div>');
 }
 
@@ -275,9 +249,8 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && root.classList.contains('is-menu')) setMenu(false);
 });
 
-// The hero is position:fixed behind the flow, so once scene two covers it there
-// is nothing to see - stop decoding its video rather than burning battery on
-// frames nobody is looking at.
+// The hero video is disabled temporarily. Keep the observer in place so the
+// replacement clip can be re-enabled here later without redesigning the page.
 const heroWrap = document.querySelector('.stage-wrap');
 if (heroWrap && 'IntersectionObserver' in window) {
   const spacer = document.querySelector('.hero-spacer');
@@ -292,8 +265,6 @@ if (heroWrap && 'IntersectionObserver' in window) {
   }
 }
 
-// pause the decoder when the tab is hidden rather than burning battery
-// decoding frames nobody is looking at
 document.addEventListener('visibilitychange', () => {
   const hidden = document.visibilityState === 'hidden';
   for (const c of Object.values(app.clips)) {
@@ -303,10 +274,6 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
-// Review hook. Draws one frame on demand and reads the framebuffer in the SAME
-// task, because the context is created without preserveDrawingBuffer. Rendering
-// here rather than piggy-backing on the animation loop means it still works when
-// the tab is hidden and rAF is throttled to a stop.
 window.__shot = async (name = 'shot', at = null) => {
   if (!app.word) return 'not ready';
   const t = at !== null ? at : (performance.now() - app.t0) / 1000;
@@ -317,7 +284,6 @@ window.__shot = async (name = 'shot', at = null) => {
   return `${app.stage.canvas.width}x${app.stage.canvas.height} @ t=${t.toFixed(2)}`;
 };
 
-// live tuning of the letter surface while matching the reference art
 window.__tune = (k, v) => { app.stage[k] = v; return app.stage[k]; };
 
 main().catch((e) => degrade(e.message));
